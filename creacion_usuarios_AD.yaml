@@ -1,0 +1,37 @@
+---
+- name: Crear usuario en Active Directory
+  hosts: domain_controllers
+  gather_facts: false
+  
+  tasks:
+    - name: Verificar si el usuario existe
+      microsoft.ad.object_info:
+        identity: "{{ username }}"
+      register: usuario
+
+    - name: Crear usuario
+      microsoft.ad.user:
+        identity: "{{ username }}"
+        firstname: "{{ firstname }}"
+        surname: "{{ lastname }}"
+        upn: "{{ username }}@empresa.local"
+        password: "{{ password }}"
+        enabled: true
+        path: "OU=Usuarios,DC=empresa,DC=local"
+        state: present
+      when: usuario.objects | length == 0
+
+    - name: Agregar usuario a los grupos del rol
+      microsoft.ad.group:
+        identity: "{{ item }}"
+        members:
+          add:
+            - "{{ username }}"
+        state: present
+      loop: "{{ roles[role] }}"
+      when: usuario.objects | length == 0
+
+    - name: Informar si el usuario ya existe
+      debug:
+        msg: "El usuario {{ username }} ya existe. No se realizaron cambios."
+      when: usuario.objects | length > 0
