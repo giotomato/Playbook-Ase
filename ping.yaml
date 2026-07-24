@@ -1,5 +1,5 @@
 ---
-- name: Hacer ping a los servidores
+- name: Prueba Ping
   hosts: all
   gather_facts: no
   tasks:
