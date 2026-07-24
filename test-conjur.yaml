@@ -2,9 +2,6 @@
 - name: Prueba conjur
   hosts: hyperv_host
   vars:
-      ansible_host: "{{ lookup('retrieve_conjur_variable', 'db/' + inventory_hostname+ '/host') }}"
-      ansible_user: "{{ lookup('retrieve_conjur_variable', 'db/' + inventory_hostname+ '/user') }}"
-      ansible_ssh_pass: "{{ lookup('retrieve_conjur_variable', 'db/' + inventory_hostname+ '/pass') }}"
       ansible_connection: winrm
       ansible_winrm_port: 5985
       ansible_winrm_transport: ntlm
