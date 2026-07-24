@@ -1,6 +1,8 @@
 ---
 - name: Prueba Ping
   hosts: all
+  become: false
+  gather_facts: false
   vars:
       ansible_connection: winrm
       ansible_winrm_port: 5985
