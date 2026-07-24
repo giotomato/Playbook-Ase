@@ -4,9 +4,6 @@
   become: false
   gather_facts: false
   vars:
-      ansible_host: 192.168.0.9
-      ansible_user: 'JARIVERAMOVIL'
-      ansible_ssh_pass: 'J30v4nyAsesuisa2026@@$$'
       ansible_connection: winrm
       ansible_winrm_port: 5985
       ansible_winrm_transport: ntlm
