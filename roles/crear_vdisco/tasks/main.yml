@@ -1,0 +1,13 @@
+---
+- name: Ensure AWX_Test directory exists
+  ansible.windows.win_file:
+    path: C:\AWX_Test
+    state: directory
+
+- name: Create VHDX file
+  ansible.windows.win_shell: |
+    $vhd = "C:\AWX_Test\TestDisk.vhdx"
+
+    if (!(Test-Path $vhd)) {
+        New-VHD -Path $vhd -SizeBytes 1GB -Dynamic
+    }
