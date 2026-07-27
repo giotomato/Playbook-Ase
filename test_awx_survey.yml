@@ -1,27 +1,33 @@
 ---
-- name: Prueba de encuesta AWX
-  hosts: localhost
-  connection: local
+- name: AWX Survey Test on Windows
+  hosts: windows
   gather_facts: yes
 
   tasks:
 
-    - name: Mostrar información ingresada
+    - name: Display survey variables
       debug:
         msg:
-          - "Servidor: {{ nombre_servidor }}"
-          - "Ambiente: {{ ambiente }}"
-          - "Ticket: {{ ticket }}"
+          - "Server Name: {{ server_name }}"
+          - "Environment: {{ environment }}"
+          - "Change Ticket: {{ change_ticket }}"
+          - "Requested By: {{ requested_by }}"
 
-    - name: Crear archivo de resultado
-      copy:
-        dest: "/tmp/prueba_awx.txt"
+    - name: Create output folder
+      ansible.windows.win_file:
+        path: C:\AWX_Test
+        state: directory
+
+    - name: Create report file
+      ansible.windows.win_copy:
         content: |
-          Fecha: {{ ansible_date_time.iso8601 }}
-          Servidor: {{ nombre_servidor }}
-          Ambiente: {{ ambiente }}
-          Ticket: {{ ticket }}
+          Execution Date: {{ ansible_date_time.iso8601 }}
+          Server Name: {{ server_name }}
+          Environment: {{ environment }}
+          Change Ticket: {{ change_ticket }}
+          Requested By: {{ requested_by }}
+        dest: C:\AWX_Test\survey_result.txt
 
-    - name: Confirmar creación del archivo
+    - name: Confirmation message
       debug:
-        msg: "Archivo generado correctamente en /tmp/prueba_awx.txt"
+        msg: "Survey results saved to C:\\AWX_Test\\survey_result.txt"
