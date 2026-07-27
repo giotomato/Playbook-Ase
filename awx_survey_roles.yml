@@ -3,8 +3,11 @@
   hosts: all
   become: false
   gather_facts: true
-  tasks:
-
+  
+  roles:
+    - crear_vdisco
+    
+  tasks:  
     - name: Display survey variables
       debug:
         msg:
@@ -32,3 +35,4 @@
     - name: Confirmation message
       debug:
         msg: "Survey results saved to C:\\AWX_Test\\survey_result.txt"
+    
