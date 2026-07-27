@@ -1,8 +1,8 @@
 ---
 - name: AWX Survey Test on Windows
   hosts: all
-  gather_facts: yes
-
+  become: false
+  gather_facts: false
   tasks:
 
     - name: Display survey variables
