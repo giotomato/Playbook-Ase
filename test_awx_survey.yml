@@ -1,0 +1,27 @@
+---
+- name: Prueba de encuesta AWX
+  hosts: localhost
+  connection: local
+  gather_facts: yes
+
+  tasks:
+
+    - name: Mostrar información ingresada
+      debug:
+        msg:
+          - "Servidor: {{ nombre_servidor }}"
+          - "Ambiente: {{ ambiente }}"
+          - "Ticket: {{ ticket }}"
+
+    - name: Crear archivo de resultado
+      copy:
+        dest: "/tmp/prueba_awx.txt"
+        content: |
+          Fecha: {{ ansible_date_time.iso8601 }}
+          Servidor: {{ nombre_servidor }}
+          Ambiente: {{ ambiente }}
+          Ticket: {{ ticket }}
+
+    - name: Confirmar creación del archivo
+      debug:
+        msg: "Archivo generado correctamente en /tmp/prueba_awx.txt"
