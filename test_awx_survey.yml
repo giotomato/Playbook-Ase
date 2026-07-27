@@ -8,6 +8,7 @@
     - name: Display survey variables
       debug:
         msg:
+          - "Execution Date: {{ ansible_date_time.iso8601 }}"
           - "Server Name: {{ server_name }}"
           - "Environment: {{ environment }}"
           - "Change Ticket: {{ change_ticket }}"
