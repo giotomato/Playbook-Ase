@@ -10,7 +10,7 @@
         msg:
           - "Execution Date: {{ ansible_date_time.iso8601 }}"
           - "Server Name: {{ server_name }}"
-          - "Environment: {{ environment }}"
+          - "Environment: {{ environment_survey }}"
           - "Change Ticket: {{ change_ticket }}"
           - "Requested By: {{ requested_by }}"
 
@@ -24,7 +24,7 @@
         content: |
           Execution Date: {{ ansible_date_time.iso8601 }}
           Server Name: {{ server_name }}
-          Environment: {{ environment }}
+          Environment: {{ environment_survey }}
           Change Ticket: {{ change_ticket }}
           Requested By: {{ requested_by }}
         dest: C:\AWX_Test\survey_result.txt
