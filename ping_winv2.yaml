@@ -1,20 +1,143 @@
 ---
-- name: Prueba Ping
-  hosts: all
-  become: false
+- name: Validar WinRM y recopilar información de Windows
+  hosts: windows
   gather_facts: false
-  tasks:
-    - name: Comprobar conexión WinRM
-      ansible.windows.win_ping:
-      register: resultado_winrm
 
-    - name: Mostrar resultado
+  tasks:
+    - name: Comprobar conexión mediante WinRM
+      ansible.windows.win_ping:
+      register: resultado_ping
+
+    - name: Recopilar información del servidor
+      ansible.windows.setup:
+        gather_subset:
+          - min
+          - platform
+          - distribution
+          - processor
+          - memory
+          - interfaces
+          - date_time
+          - bios
+
+    - name: Consultar tiempo desde el último reinicio
+      ansible.windows.win_powershell:
+        script: |
+          $os = Get-CimInstance Win32_OperatingSystem
+          $uptime = (Get-Date) - $os.LastBootUpTime
+
+          [PSCustomObject]@{
+              UltimoInicio = $os.LastBootUpTime.ToString("yyyy-MM-dd HH:mm:ss")
+              Dias         = $uptime.Days
+              Horas        = $uptime.Hours
+              Minutos      = $uptime.Minutes
+          }
+      register: informacion_uptime
+
+    - name: Consultar espacio de los discos locales
+      ansible.windows.win_powershell:
+        script: |
+          Get-CimInstance Win32_LogicalDisk |
+              Where-Object { $_.DriveType -eq 3 } |
+              ForEach-Object {
+                  [PSCustomObject]@{
+                      Unidad           = $_.DeviceID
+                      TipoSistema      = $_.FileSystem
+                      Etiqueta         = $_.VolumeName
+                      CapacidadGB      = [math]::Round($_.Size / 1GB, 2)
+                      LibreGB          = [math]::Round($_.FreeSpace / 1GB, 2)
+                      UsadoGB          = [math]::Round(
+                          ($_.Size - $_.FreeSpace) / 1GB, 2
+                      )
+                      PorcentajeUsado  = if ($_.Size -gt 0) {
+                          [math]::Round(
+                              (($_.Size - $_.FreeSpace) / $_.Size) * 100,
+                              2
+                          )
+                      } else {
+                          0
+                      }
+                  }
+              }
+      register: informacion_discos
+
+    - name: Consultar configuración de red
+      ansible.windows.win_powershell:
+        script: |
+          Get-NetIPConfiguration |
+              Where-Object { $_.IPv4Address } |
+              ForEach-Object {
+                  [PSCustomObject]@{
+                      Interfaz = $_.InterfaceAlias
+                      IPv4     = (
+                          $_.IPv4Address.IPAddress -join ", "
+                      )
+                      Gateway  = (
+                          $_.IPv4DefaultGateway.NextHop -join ", "
+                      )
+                      DNS      = (
+                          $_.DNSServer.ServerAddresses -join ", "
+                      )
+                  }
+              }
+      register: informacion_red
+
+    - name: Consultar estado de servicios principales
+      ansible.windows.win_powershell:
+        script: |
+          $servicios = @(
+              "WinRM",
+              "W32Time",
+              "EventLog",
+              "LanmanServer",
+              "Dnscache"
+          )
+
+          foreach ($nombre in $servicios) {
+              $servicio = Get-Service -Name $nombre -ErrorAction SilentlyContinue
+
+              if ($servicio) {
+                  [PSCustomObject]@{
+                      Servicio = $servicio.Name
+                      Nombre   = $servicio.DisplayName
+                      Estado   = $servicio.Status.ToString()
+                      Inicio   = $servicio.StartType.ToString()
+                  }
+              }
+          }
+      register: informacion_servicios
+
+    - name: Mostrar resumen técnico del servidor
       ansible.builtin.debug:
         msg:
-          - "Conexión WinRM exitosa"
-          - "Servidor: {{ inventory_hostname }}"
-          - "Dirección: {{ ansible_host }}"
-          - "Puerto: {{ ansible_port }}"
-          - "Transporte: {{ ansible_winrm_transport }}"
-          - "Cifrado de mensajes: {{ ansible_winrm_message_encryption }}"
-          - "Respuesta: {{ resultado_winrm.ping }}"
+          - "=============================================="
+          - "        INFORMACIÓN DEL SERVIDOR WINDOWS"
+          - "=============================================="
+          - "Conexión WinRM: {{ resultado_ping.ping }}"
+          - "Nombre: {{ ansible_hostname | default('No disponible') }}"
+          - "FQDN: {{ ansible_fqdn | default('No disponible') }}"
+          - "Dominio: {{ ansible_windows_domain | default('No disponible') }}"
+          - "Sistema operativo: {{ ansible_distribution | default('No disponible') }}"
+          - "Versión: {{ ansible_distribution_version | default('No disponible') }}"
+          - "Edición: {{ ansible_os_name | default('No disponible') }}"
+          - "Arquitectura: {{ ansible_architecture | default('No disponible') }}"
+          - "Procesadores lógicos: {{ ansible_processor_vcpus | default('No disponible') }}"
+          - "Memoria RAM MB: {{ ansible_memtotal_mb | default('No disponible') }}"
+          - "Memoria libre MB: {{ ansible_memfree_mb | default('No disponible') }}"
+          - "BIOS: {{ ansible_bios_version | default('No disponible') }}"
+          - "Fabricante: {{ ansible_system_vendor | default('No disponible') }}"
+          - "Modelo: {{ ansible_product_name | default('No disponible') }}"
+          - "Último inicio: {{ informacion_uptime.output[0].UltimoInicio | default('No disponible') }}"
+          - "Tiempo activo: {{ informacion_uptime.output[0].Dias | default(0) }} días, {{ informacion_uptime.output[0].Horas | default(0) }} horas y {{ informacion_uptime.output[0].Minutos | default(0) }} minutos"
+
+    - name: Mostrar información de discos
+      ansible.builtin.debug:
+        var: informacion_discos.output
+
+    - name: Mostrar configuración de red
+      ansible.builtin.debug:
+        var: informacion_red.output
+
+    - name: Mostrar servicios principales
+      ansible.builtin.debug:
+        var: informacion_servicios.output
