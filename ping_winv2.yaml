@@ -1,6 +1,6 @@
 ---
 - name: Validar WinRM y recopilar información de Windows
-  hosts: Windows Servers
+  hosts: "Windows Servers"
   gather_facts: false
 
   tasks:
