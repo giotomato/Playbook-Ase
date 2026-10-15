@@ -4,5 +4,17 @@
   become: false
   gather_facts: false
   tasks:
-    - name: ping server
-      win_ping:
+    - name: Comprobar conexión WinRM
+      ansible.windows.win_ping:
+      register: resultado_winrm
+
+    - name: Mostrar resultado
+      ansible.builtin.debug:
+        msg:
+          - "Conexión WinRM exitosa"
+          - "Servidor: {{ inventory_hostname }}"
+          - "Dirección: {{ ansible_host }}"
+          - "Puerto: {{ ansible_port }}"
+          - "Transporte: {{ ansible_winrm_transport }}"
+          - "Cifrado de mensajes: {{ ansible_winrm_message_encryption }}"
+          - "Respuesta: {{ resultado_winrm.ping }}"
