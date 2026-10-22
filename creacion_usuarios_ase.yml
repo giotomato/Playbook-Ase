@@ -1,0 +1,524 @@
+---
+- name: Crear usuario en Active Directory desde AWX
+  hosts: windows_ad_management
+  gather_facts: false
+
+  collections:
+    - microsoft.ad
+    - ansible.windows
+
+  vars:
+    # Dominio admitido por la automatización
+    dominio_upn_permitido: "asesuisa.com"
+
+    # Controles de la ejecución
+    usuario_creado_en_ejecucion: false
+    rollback_si_falla: true
+
+  module_defaults:
+    group/microsoft.ad.domain:
+      domain_server: "{{ ad_domain_server | default(omit) }}"
+      domain_username: "{{ ad_domain_username | default(omit) }}"
+      domain_password: "{{ ad_domain_password | default(omit) }}"
+
+  tasks:
+
+    # ============================================================
+    # 1. NORMALIZACIÓN DE DATOS
+    # ============================================================
+
+    - name: Normalizar los datos recibidos desde la Survey
+      ansible.builtin.set_fact:
+        nombre_normalizado: >-
+          {{
+            nombre
+            | default('')
+            | trim
+          }}
+        apellido_normalizado: >-
+          {{
+            apellido
+            | default('')
+            | trim
+          }}
+        usuario_normalizado: >-
+          {{
+            username
+            | default('')
+            | trim
+            | lower
+          }}
+        dominio_normalizado: >-
+          {{
+            dominio_upn
+            | default(dominio_upn_permitido)
+            | trim
+            | lower
+            | regex_replace('^@', '')
+          }}
+        correo_normalizado: >-
+          {{
+            correo
+            | default('')
+            | trim
+            | lower
+          }}
+        employee_id_normalizado: >-
+          {{
+            employee_id
+            | default('')
+            | string
+            | trim
+          }}
+        manager_normalizado: >-
+          {{
+            manager
+            | default('')
+            | trim
+          }}
+        plantilla_normalizada: >-
+          {{
+            usuario_referencia
+            | default('')
+            | trim
+          }}
+      no_log: false
+
+    - name: Generar UPN esperado
+      ansible.builtin.set_fact:
+        upn_generado: "{{ usuario_normalizado }}@{{ dominio_normalizado }}"
+
+    - name: Generar correo cuando no haya sido suministrado
+      ansible.builtin.set_fact:
+        correo_final: >-
+          {{
+            correo_normalizado
+            if correo_normalizado | length > 0
+            else upn_generado
+          }}
+
+    # ============================================================
+    # 2. VALIDACIONES DE CAMPOS OBLIGATORIOS
+    # ============================================================
+
+    - name: Validar campos obligatorios
+      ansible.builtin.assert:
+        that:
+          - nombre_normalizado | length >= 2
+          - apellido_normalizado | length >= 2
+          - usuario_normalizado | length > 0
+          - dominio_normalizado | length > 0
+          - correo_final | length > 0
+          - password_temporal | default('') | length > 0
+          - descripcion | default('') | trim | length > 0
+          - oficina | default('') | trim | length > 0
+          - cargo | default('') | trim | length > 0
+          - departamento | default('') | trim | length > 0
+          - empresa | default('') | trim | length > 0
+          - manager_normalizado | length > 0
+          - employee_id_normalizado | length > 0
+          - plantilla_normalizada | length > 0
+          - ticket | default('') | trim | length > 0
+        fail_msg: >-
+          Existen campos obligatorios vacíos o incompletos.
+          Revise nombre, apellido, usuario, dominio, contraseña,
+          descripción, oficina, cargo, departamento, empresa,
+          manager, EmployeeID, usuario de referencia y ticket.
+        success_msg: "Todos los campos obligatorios fueron proporcionados."
+      no_log: true
+
+    - name: Validar formato y longitud del sAMAccountName
+      ansible.builtin.assert:
+        that:
+          - usuario_normalizado is match('^[a-z0-9._-]+$')
+          - usuario_normalizado | length <= 20
+        fail_msg: >-
+          El sAMAccountName '{{ usuario_normalizado }}' no es válido.
+          Solo se permiten letras sin acentos, números, punto,
+          guion y guion bajo, con máximo 20 caracteres.
+        success_msg: "El formato del sAMAccountName es válido."
+
+    - name: Evitar caracteres LDAP no autorizados
+      ansible.builtin.assert:
+        that:
+          - usuario_normalizado is not search('[*()\\]')
+          - employee_id_normalizado is not search('[*()\\]')
+          - manager_normalizado is not search('[*()\\]')
+          - plantilla_normalizada is not search('[*()\\]')
+        fail_msg: >-
+          Uno de los campos contiene caracteres no permitidos
+          para una consulta LDAP.
+        success_msg: >-
+          Los campos utilizados en las consultas LDAP
+          no contienen caracteres no autorizados.
+
+    - name: Validar dominio UPN permitido
+      ansible.builtin.assert:
+        that:
+          - dominio_normalizado == dominio_upn_permitido
+          - dominio_normalizado is match('^[a-z0-9.-]+\\.[a-z]{2,}$')
+        fail_msg: >-
+          El dominio '{{ dominio_normalizado }}' no está autorizado.
+          El dominio permitido es '{{ dominio_upn_permitido }}'.
+        success_msg: "El dominio UPN está autorizado."
+
+    - name: Validar formato del correo electrónico
+      ansible.builtin.assert:
+        that:
+          - correo_final is match('^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$')
+        fail_msg: "El correo '{{ correo_final }}' no tiene un formato válido."
+        success_msg: "El formato del correo electrónico es válido."
+
+    - name: Validar opciones incompatibles de contraseña
+      ansible.builtin.assert:
+        that:
+          - not (
+              cambiar_password_inicio | default(false) | bool
+              and password_nunca_expira | default(false) | bool
+            )
+        fail_msg: >-
+          No se puede seleccionar simultáneamente “Cambiar contraseña
+          al iniciar sesión” y “La contraseña nunca expira”.
+        success_msg: "Las opciones de contraseña son compatibles."
+
+    # ============================================================
+    # 3. VALIDACIÓN DE USUARIO DE REFERENCIA
+    # ============================================================
+
+    - name: Consultar usuario de referencia
+      microsoft.ad.object_info:
+        ldap_filter: >-
+          (&
+            (objectCategory=person)
+            (objectClass=user)
+            (sAMAccountName={{ plantilla_normalizada }})
+          )
+        properties:
+          - displayName
+          - sAMAccountName
+          - distinguishedName
+          - memberOf
+      register: resultado_plantilla
+
+    - name: Fallar si el usuario de referencia no existe
+      ansible.builtin.assert:
+        that:
+          - resultado_plantilla.objects | length == 1
+        fail_msg: >-
+          No se encontró el usuario de referencia
+          '{{ plantilla_normalizada }}' o la búsqueda devolvió
+          más de un resultado.
+        success_msg: >-
+          Usuario de referencia '{{ plantilla_normalizada }}'
+          validado correctamente.
+
+    - name: Establecer datos del usuario de referencia
+      ansible.builtin.set_fact:
+        plantilla_ad: "{{ resultado_plantilla.objects[0] }}"
+        ou_destino: >-
+          {{          
+            resultado_plantilla.objects[0].DistinguishedName
+            | regex_replace('^[^,]+,', '')
+          }}
+        grupos_plantilla: >-
+          {{
+            resultado_plantilla.objects[0].memberOf
+            | default([])
+          }}
+
+    # ============================================================
+    # 4. VALIDACIONES DE DUPLICADOS
+    # ============================================================
+
+    - name: Buscar usuario por sAMAccountName
+      microsoft.ad.object_info:
+        ldap_filter: >-
+          (&
+            (objectCategory=person)
+            (objectClass=user)
+            (sAMAccountName={{ usuario_normalizado }})
+          )
+        properties:
+          - sAMAccountName
+          - displayName
+          - distinguishedName
+      register: usuario_existente
+
+    - name: Detener ejecución si el usuario ya existe
+      ansible.builtin.fail:
+        msg: >-
+          El usuario '{{ usuario_normalizado }}' ya existe en Active
+          Directory. La ejecución fue detenida y no se realizaron
+          modificaciones sobre el usuario existente.
+      when: usuario_existente.objects | length > 0
+
+    - name: Buscar UPN duplicado
+      microsoft.ad.object_info:
+        ldap_filter: >-
+          (&
+            (objectCategory=person)
+            (objectClass=user)
+            (userPrincipalName={{ upn_generado }})
+          )
+        properties:
+          - sAMAccountName
+          - userPrincipalName
+      register: upn_existente
+
+    - name: Detener ejecución si el UPN ya existe
+      ansible.builtin.fail:
+        msg: >-
+          El UPN '{{ upn_generado }}' ya está asignado al usuario
+          '{{ upn_existente.objects[0].SamAccountName | default("desconocido") }}'.
+          No se realizaron modificaciones.
+      when: upn_existente.objects | length > 0
+
+    - name: Buscar correo duplicado
+      microsoft.ad.object_info:
+        ldap_filter: >-
+          (&
+            (objectCategory=person)
+            (objectClass=user)
+            (mail={{ correo_final }})
+          )
+        properties:
+          - sAMAccountName
+          - mail
+      register: correo_existente
+
+    - name: Detener ejecución si el correo ya existe
+      ansible.builtin.fail:
+        msg: >-
+          El correo '{{ correo_final }}' ya está asignado a otro
+          objeto de Active Directory. No se realizaron modificaciones.
+      when: correo_existente.objects | length > 0
+
+    - name: Buscar EmployeeID duplicado
+      microsoft.ad.object_info:
+        ldap_filter: "(employeeID={{ employee_id_normalizado }})"
+        properties:
+          - sAMAccountName
+          - displayName
+          - employeeID
+      register: employee_id_existente
+
+    - name: Detener ejecución si el EmployeeID ya existe
+      ansible.builtin.fail:
+        msg: >-
+          El EmployeeID '{{ employee_id_normalizado }}' ya está
+          asignado al usuario
+          '{{ employee_id_existente.objects[0].SamAccountName | default("desconocido") }}'.
+          No se realizaron modificaciones.
+      when: employee_id_existente.objects | length > 0
+
+    # ============================================================
+    # 5. VALIDACIÓN DEL MANAGER
+    # ============================================================
+
+    - name: Buscar manager
+      microsoft.ad.object_info:
+        ldap_filter: >-
+          (&
+            (objectCategory=person)
+            (objectClass=user)
+            (|
+              (sAMAccountName={{ manager_normalizado }})
+              (userPrincipalName={{ manager_normalizado }})
+            )
+          )
+        properties:
+          - displayName
+          - sAMAccountName
+          - distinguishedName
+      register: resultado_manager
+
+    - name: Validar resultado de búsqueda del manager
+      ansible.builtin.assert:
+        that:
+          - resultado_manager.objects | length == 1
+        fail_msg: >-
+          No se encontró un manager único con la identidad
+          '{{ manager_normalizado }}'.
+        success_msg: "Manager validado correctamente."
+
+    - name: Establecer Distinguished Name del manager
+      ansible.builtin.set_fact:
+        manager_dn: "{{ resultado_manager.objects[0].DistinguishedName }}"
+
+    # ============================================================
+    # 6. RESUMEN PREVIO
+    # ============================================================
+
+    - name: Mostrar resumen de creación
+      ansible.builtin.debug:
+        msg:
+          - "Ticket: {{ ticket }}"
+          - "Nombre: {{ nombre_normalizado }} {{ apellido_normalizado }}"
+          - "Usuario: {{ usuario_normalizado }}"
+          - "UPN: {{ upn_generado }}"
+          - "Correo: {{ correo_final }}"
+          - "OU destino: {{ ou_destino }}"
+          - "Cargo: {{ cargo }}"
+          - "Departamento: {{ departamento }}"
+          - "Empresa: {{ empresa }}"
+          - "Manager: {{ resultado_manager.objects[0].DisplayName }}"
+          - "EmployeeID: {{ employee_id_normalizado }}"
+          - "Usuario de referencia: {{ plantilla_ad.DisplayName }}"
+          - "Grupos detectados: {{ grupos_plantilla | length }}"
+
+    # ============================================================
+    # 7. CREACIÓN, GRUPOS Y ROLLBACK
+    # ============================================================
+
+    - name: Crear usuario y copiar grupos
+      block:
+
+        - name: Crear usuario en Active Directory
+          microsoft.ad.user:
+            identity: "{{ usuario_normalizado }}"
+            name: "{{ nombre_normalizado }} {{ apellido_normalizado }}"
+            firstname: "{{ nombre_normalizado }}"
+            surname: "{{ apellido_normalizado }}"
+            display_name: "{{ nombre_normalizado }} {{ apellido_normalizado }}"
+            upn: "{{ upn_generado }}"
+            email: "{{ correo_final }}"
+            path: "{{ ou_destino }}"
+            password: "{{ password_temporal }}"
+            enabled: true
+            password_expired: "{{ cambiar_password_inicio | default(true) | bool }}"
+            password_never_expires: "{{ password_nunca_expira | default(false) | bool }}"
+            description: "{{ descripcion }}"
+            office: "{{ oficina }}"
+            title: "{{ cargo }}"
+            department: "{{ departamento }}"
+            company: "{{ empresa }}"
+            manager: "{{ manager_dn }}"
+            state: present
+            attributes:
+              set:
+                employeeID: "{{ employee_id_normalizado }}"
+          register: resultado_creacion
+          no_log: true
+
+        - name: Registrar que el usuario fue creado en esta ejecución
+          ansible.builtin.set_fact:
+            usuario_creado_en_ejecucion: true
+          when: resultado_creacion.changed
+
+        - name: Agregar usuario a los grupos del usuario de referencia
+          microsoft.ad.group:
+            identity: "{{ item }}"
+            members:
+              add:
+                - "{{ usuario_normalizado }}"
+            state: present
+          loop: "{{ grupos_plantilla }}"
+          loop_control:
+            label: "{{ item }}"
+          when: grupos_plantilla | length > 0
+
+        - name: Consultar usuario creado para validación final
+          microsoft.ad.object_info:
+            ldap_filter: >-
+              (&
+                (objectCategory=person)
+                (objectClass=user)
+                (sAMAccountName={{ usuario_normalizado }})
+              )
+            properties:
+              - displayName
+              - sAMAccountName
+              - userPrincipalName
+              - mail
+              - distinguishedName
+              - employeeID
+              - manager
+              - title
+              - department
+              - company
+              - physicalDeliveryOfficeName
+              - description
+              - memberOf
+              - enabled
+          register: usuario_final
+
+        - name: Validar atributos obligatorios después de la creación
+          ansible.builtin.assert:
+            that:
+              - usuario_final.objects | length == 1
+              - usuario_final.objects[0].SamAccountName == usuario_normalizado
+              - usuario_final.objects[0].UserPrincipalName | lower == upn_generado
+              - usuario_final.objects[0].mail | lower == correo_final
+              - usuario_final.objects[0].employeeID | string == employee_id_normalizado
+              - usuario_final.objects[0].Enabled | bool
+            fail_msg: >-
+              El usuario fue creado, pero la validación final de sus
+              atributos no fue satisfactoria.
+            success_msg: >-
+              El usuario '{{ usuario_normalizado }}' fue creado y
+              validado correctamente.
+
+        - name: Validar cantidad de grupos copiados
+          ansible.builtin.assert:
+            that:
+              - >-
+                (
+                  usuario_final.objects[0].memberOf
+                  | default([])
+                  | intersect(grupos_plantilla)
+                  | length
+                ) == (grupos_plantilla | length)
+            fail_msg: >-
+              No fue posible confirmar todas las membresías del usuario.
+              Se esperaba copiar {{ grupos_plantilla | length }} grupos.
+            success_msg: >-
+              Se confirmaron {{ grupos_plantilla | length }}
+              membresías en Active Directory.
+
+      rescue:
+
+        - name: Mostrar error ocurrido después de iniciar la creación
+          ansible.builtin.debug:
+            msg:
+              - "Ocurrió un error durante la creación o validación."
+              - "Tarea con error: {{ ansible_failed_task.name }}"
+              - "Detalle: {{ ansible_failed_result.msg | default('Sin detalle') }}"
+              - "Rollback habilitado: {{ rollback_si_falla }}"
+              - "Usuario creado en esta ejecución: {{ usuario_creado_en_ejecucion }}"
+
+        - name: Eliminar usuario para revertir la operación
+          microsoft.ad.user:
+            identity: "{{ usuario_normalizado }}"
+            state: absent
+          when:
+            - rollback_si_falla | bool
+            - usuario_creado_en_ejecucion | bool
+
+        - name: Finalizar Job como fallido
+          ansible.builtin.fail:
+            msg: >-
+              La creación del usuario '{{ usuario_normalizado }}'
+              no se completó correctamente.
+              {% if usuario_creado_en_ejecucion | bool and rollback_si_falla | bool %}
+              Se ejecutó el rollback y el usuario fue eliminado.
+              {% else %}
+              No fue necesario ejecutar rollback porque el usuario
+              no llegó a crearse en esta ejecución.
+              {% endif %}
+
+    # ============================================================
+    # 8. RESULTADO FINAL
+    # ============================================================
+
+    - name: Mostrar resultado final
+      ansible.builtin.debug:
+        msg:
+          - "RESULTADO: USUARIO CREADO CORRECTAMENTE"
+          - "Ticket: {{ ticket }}"
+          - "Usuario: {{ usuario_normalizado }}"
+          - "UPN: {{ upn_generado }}"
+          - "Correo: {{ correo_final }}"
+          - "EmployeeID: {{ employee_id_normalizado }}"
+          - "OU: {{ ou_destino }}"
+          - "Manager: {{ resultado_manager.objects[0].DisplayName }}"
+          - "Grupos copiados: {{ grupos_plantilla | length }}"
