@@ -1,6 +1,6 @@
 ---
 - name: Probar variables recibidas desde la Survey de AWX
-  hosts: windows_ad_management
+  hosts: windows
   gather_facts: false
 
   vars:
