@@ -1,6 +1,6 @@
 ---
 - name: Crear usuario en Active Directory desde AWX
-  hosts: windows_ad_management
+  hosts: Windows
   gather_facts: false
 
   collections:
