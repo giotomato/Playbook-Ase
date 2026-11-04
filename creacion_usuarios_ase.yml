@@ -4,8 +4,8 @@
   gather_facts: false
 
   vars:
-    # Valor fijo definido en el playbook.
-    dominio_upn_permitido: "asesuisa.com"
+    # Dominio autorizado definido internamente
+    allowed_upn_domain: "asesuisa.com"
 
   tasks:
 
@@ -16,55 +16,45 @@
     - name: Mostrar variables originales recibidas desde la Survey
       ansible.builtin.debug:
         msg:
-          - "nombres = {{ nombres | default('NO RECIBIDO') }}"
-          - "apellidos = {{ apellidos | default('NO RECIBIDO') }}"
-          - "username = {{ username | default('NO RECIBIDO') }}"
-          - "dominio_upn = {{ dominio_upn | default('NO RECIBIDO') }}"
-          - "correo = {{ correo | default('VACÍO / NO RECIBIDO') }}"
-          - "cambiar_password_inicio = {{ cambiar_password_inicio | default('NO RECIBIDO') }}"
-          - "cambiar_password_inicio tipo = {{ cambiar_password_inicio | default(false) | type_debug }}"
-          - "password_nunca_expira = {{ password_nunca_expira | default('NO RECIBIDO') }}"
-          - "password_nunca_expira tipo = {{ password_nunca_expira | default(false) | type_debug }}"
-          - "descripcion = {{ descripcion | default('NO RECIBIDO') }}"
-          - "oficina = {{ oficina | default('NO RECIBIDO') }}"
-          - "cargo = {{ cargo | default('NO RECIBIDO') }}"
-          - "departamento = {{ departamento | default('NO RECIBIDO') }}"
-          - "empresa = {{ empresa | default('NO RECIBIDO') }}"
-          - "manager = {{ manager | default('NO RECIBIDO') }}"
+          - "given_names = {{ given_names | default('NO RECIBIDO') }}"
+          - "surnames = {{ surnames | default('NO RECIBIDO') }}"
+          - "sam_account_name = {{ sam_account_name | default('NO RECIBIDO') }}"
+          - "upn_domain = {{ upn_domain | default('NO RECIBIDO') }}"
+          - "email_address = {{ email_address | default('VACÍO / NO RECIBIDO') }}"
+          - "change_password_at_logon = {{ change_password_at_logon | default('NO RECIBIDO') }}"
+          - "change_password_at_logon tipo = {{ change_password_at_logon | default(false) | type_debug }}"
+          - "password_never_expires = {{ password_never_expires | default('NO RECIBIDO') }}"
+          - "password_never_expires tipo = {{ password_never_expires | default(false) | type_debug }}"
+          - "description = {{ description | default('NO RECIBIDO') }}"
+          - "office = {{ office | default('NO RECIBIDO') }}"
+          - "job_title = {{ job_title | default('NO RECIBIDO') }}"
+          - "department = {{ department | default('NO RECIBIDO') }}"
+          - "company = {{ company | default('NO RECIBIDO') }}"
+          - "manager_username = {{ manager_username | default('NO RECIBIDO') }}"
           - "employee_id = {{ employee_id | default('NO RECIBIDO') }}"
           - "employee_id tipo = {{ employee_id | default('') | type_debug }}"
-          - "usuario_referencia = {{ usuario_referencia | default('NO RECIBIDO') }}"
-          - "ticket = {{ ticket | default('NO RECIBIDO') }}"
+          - "reference_user = {{ reference_user | default('NO RECIBIDO') }}"
+          - "request_ticket = {{ request_ticket | default('NO RECIBIDO') }}"
 
     # ============================================================
-    # 2. VERIFICAR LA CONTRASEÑA SIN MOSTRAR SU CONTENIDO
+    # 2. VERIFICAR CONTRASEÑA SIN MOSTRAR SU CONTENIDO
     # ============================================================
 
     - name: Verificar recepción de la contraseña temporal
-      ansible.builtin.debug:
-        msg:
-          - "password_temporal fue recibida = {{ password_temporal is defined }}"
-          - "password_temporal tiene contenido = {{ password_temporal | default('') | length > 0 }}"
-          - "longitud de password_temporal = {{ password_temporal | default('') | length }}"
+      ansible.builtin.set_fact:
+        temporary_password_received: >-
+          {{
+            temporary_password is defined
+            and temporary_password | length > 0
+          }}
       no_log: true
 
-    - name: Informar que la contraseña fue recibida
+    - name: Informar estado de recepción de la contraseña
       ansible.builtin.debug:
         msg: >-
-          La contraseña temporal fue recibida por AWX.
+          Contraseña temporal recibida:
+          {{ temporary_password_received }}.
           El contenido no se muestra por motivos de seguridad.
-      when:
-        - password_temporal is defined
-        - password_temporal | length > 0
-
-    - name: Informar que la contraseña no fue recibida
-      ansible.builtin.debug:
-        msg: >-
-          La variable password_temporal no fue recibida
-          o fue enviada vacía desde la Survey.
-      when:
-        - password_temporal is not defined
-          or password_temporal | default('') | length == 0
 
     # ============================================================
     # 3. NORMALIZAR VARIABLES RECIBIDAS
@@ -72,48 +62,96 @@
 
     - name: Normalizar variables recibidas desde la Survey
       ansible.builtin.set_fact:
-        nombres_normalizados: >-
+        normalized_given_names: >-
           {{
-            nombres
+            given_names
             | default('')
             | trim
             | regex_replace('\s+', ' ')
           }}
 
-        apellidos_normalizados: >-
+        normalized_surnames: >-
           {{
-            apellidos
+            surnames
             | default('')
             | trim
             | regex_replace('\s+', ' ')
           }}
 
-        usuario_normalizado: >-
+        normalized_sam_account_name: >-
           {{
-            username
+            sam_account_name
             | default('')
             | trim
             | lower
           }}
 
-        dominio_normalizado: >-
+        normalized_upn_domain: >-
           {{
-            dominio_upn
-            | default(dominio_upn_permitido)
+            upn_domain
+            | default(allowed_upn_domain)
             | trim
             | lower
             | regex_replace('^@', '')
           }}
 
-        correo_normalizado: >-
+        normalized_email_address: >-
           {{
-            correo
+            email_address
             | default('')
             | trim
             | lower
           }}
 
-        employee_id_normalizado: >-
+        normalized_description: >-
+          {{
+            description
+            | default('')
+            | trim
+            | regex_replace('\s+', ' ')
+          }}
+
+        normalized_office: >-
+          {{
+            office
+            | default('')
+            | trim
+            | regex_replace('\s+', ' ')
+          }}
+
+        normalized_job_title: >-
+          {{
+            job_title
+            | default('')
+            | trim
+            | regex_replace('\s+', ' ')
+          }}
+
+        normalized_department: >-
+          {{
+            department
+            | default('')
+            | trim
+            | regex_replace('\s+', ' ')
+          }}
+
+        normalized_company: >-
+          {{
+            company
+            | default('')
+            | trim
+            | regex_replace('\s+', ' ')
+          }}
+
+        normalized_manager_username: >-
+          {{
+            manager_username
+            | default('')
+            | trim
+            | lower
+          }}
+
+        normalized_employee_id: >-
           {{
             employee_id
             | default('')
@@ -121,78 +159,32 @@
             | trim
           }}
 
-        manager_normalizado: >-
+        normalized_reference_user: >-
           {{
-            manager
-            | default('')
-            | trim
-          }}
-
-        plantilla_normalizada: >-
-          {{
-            usuario_referencia
+            reference_user
             | default('')
             | trim
             | lower
           }}
 
-        descripcion_normalizada: >-
+        normalized_request_ticket: >-
           {{
-            descripcion
+            request_ticket
             | default('')
             | trim
-            | regex_replace('\s+', ' ')
+            | upper
           }}
 
-        oficina_normalizada: >-
+        change_password_at_logon_bool: >-
           {{
-            oficina
-            | default('')
-            | trim
-            | regex_replace('\s+', ' ')
-          }}
-
-        cargo_normalizado: >-
-          {{
-            cargo
-            | default('')
-            | trim
-            | regex_replace('\s+', ' ')
-          }}
-
-        departamento_normalizado: >-
-          {{
-            departamento
-            | default('')
-            | trim
-            | regex_replace('\s+', ' ')
-          }}
-
-        empresa_normalizada: >-
-          {{
-            empresa
-            | default('')
-            | trim
-            | regex_replace('\s+', ' ')
-          }}
-
-        ticket_normalizado: >-
-          {{
-            ticket
-            | default('')
-            | trim
-          }}
-
-        cambiar_password_inicio_booleano: >-
-          {{
-            cambiar_password_inicio
+            change_password_at_logon
             | default(true)
             | bool
           }}
 
-        password_nunca_expira_booleano: >-
+        password_never_expires_bool: >-
           {{
-            password_nunca_expira
+            password_never_expires
             | default(false)
             | bool
           }}
@@ -203,59 +195,60 @@
 
     - name: Construir nombre completo
       ansible.builtin.set_fact:
-        nombre_completo: >-
+        display_name: >-
           {{
-            nombres_normalizados
+            normalized_given_names
             ~ ' '
-            ~ apellidos_normalizados
+            ~ normalized_surnames
           }}
 
     - name: Construir UPN
       ansible.builtin.set_fact:
-        upn_generado: >-
+        user_principal_name: >-
           {{
-            usuario_normalizado
+            normalized_sam_account_name
             ~ '@'
-            ~ dominio_normalizado
+            ~ normalized_upn_domain
           }}
 
-    - name: Construir correo final
+    - name: Construir correo electrónico final
       ansible.builtin.set_fact:
-        correo_final: >-
+        final_email_address: >-
           {{
-            correo_normalizado
-            if correo_normalizado | length > 0
-            else upn_generado
+            normalized_email_address
+            if normalized_email_address | length > 0
+            else user_principal_name
           }}
 
     # ============================================================
-    # 5. MOSTRAR RESULTADO DESPUÉS DE NORMALIZAR
+    # 5. MOSTRAR VARIABLES NORMALIZADAS Y CALCULADAS
     # ============================================================
 
     - name: Mostrar variables normalizadas y calculadas
       ansible.builtin.debug:
         msg:
-          - "Nombres normalizados: {{ nombres_normalizados }}"
-          - "Apellidos normalizados: {{ apellidos_normalizados }}"
-          - "Nombre completo: {{ nombre_completo }}"
-          - "Usuario normalizado: {{ usuario_normalizado }}"
-          - "Dominio normalizado: {{ dominio_normalizado }}"
-          - "UPN generado: {{ upn_generado }}"
-          - "Correo ingresado: {{ correo_normalizado | default('') }}"
-          - "Correo final: {{ correo_final }}"
-          - "Descripción: {{ descripcion_normalizada }}"
-          - "Oficina: {{ oficina_normalizada }}"
-          - "Cargo: {{ cargo_normalizado }}"
-          - "Departamento: {{ departamento_normalizado }}"
-          - "Empresa: {{ empresa_normalizada }}"
-          - "Manager: {{ manager_normalizado }}"
-          - "EmployeeID: {{ employee_id_normalizado }}"
-          - "Usuario de referencia: {{ plantilla_normalizada }}"
-          - "Ticket: {{ ticket_normalizado }}"
-          - "Cambiar contraseña al iniciar: {{ cambiar_password_inicio_booleano }}"
-          - "Cambiar contraseña tipo final: {{ cambiar_password_inicio_booleano | type_debug }}"
-          - "Contraseña nunca expira: {{ password_nunca_expira_booleano }}"
-          - "Contraseña nunca expira tipo final: {{ password_nunca_expira_booleano | type_debug }}"
+          - "Nombres: {{ normalized_given_names }}"
+          - "Apellidos: {{ normalized_surnames }}"
+          - "Nombre completo: {{ display_name }}"
+          - "sAMAccountName: {{ normalized_sam_account_name }}"
+          - "Dominio UPN: {{ normalized_upn_domain }}"
+          - "User Principal Name: {{ user_principal_name }}"
+          - "Correo ingresado: {{ normalized_email_address }}"
+          - "Correo final: {{ final_email_address }}"
+          - "Descripción: {{ normalized_description }}"
+          - "Oficina: {{ normalized_office }}"
+          - "Cargo: {{ normalized_job_title }}"
+          - "Departamento: {{ normalized_department }}"
+          - "Empresa: {{ normalized_company }}"
+          - "Manager: {{ normalized_manager_username }}"
+          - "EmployeeID: {{ normalized_employee_id }}"
+          - "Usuario de referencia: {{ normalized_reference_user }}"
+          - "Ticket: {{ normalized_request_ticket }}"
+          - "Cambiar contraseña al iniciar: {{ change_password_at_logon_bool }}"
+          - "Tipo de variable: {{ change_password_at_logon_bool | type_debug }}"
+          - "Contraseña nunca expira: {{ password_never_expires_bool }}"
+          - "Tipo de variable: {{ password_never_expires_bool | type_debug }}"
+          - "Contraseña temporal recibida: {{ temporary_password_received }}"
 
     # ============================================================
     # 6. FINALIZAR PRUEBA
@@ -264,5 +257,5 @@
     - name: Finalizar prueba de variables
       ansible.builtin.debug:
         msg: >-
-          Prueba finalizada. No se consultó Active Directory,
-          no se creó ningún usuario y no se realizaron modificaciones.
+          Prueba finalizada correctamente. No se consultó
+          Active Directory y no se realizaron modificaciones.
